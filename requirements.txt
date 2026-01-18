@@ -1,0 +1,4 @@
+openai-whisper
+selenium
+webdriver-manager
+yt-dlp
