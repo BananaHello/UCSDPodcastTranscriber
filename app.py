@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""
+Flask backend for UCSD Podcast Transcriber Web App
+"""
+
+import os
+import sys
+import uuid
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+
+# Import the transcriber functions
+from ucsd_podcast_transcriber import (
+    transcribe_podcast,
+    check_dependencies,
+    download_audio,
+    transcribe_audio,
+    clean_transcript,
+    save_transcript
+)
+
+app = Flask(__name__, static_folder='static', static_url_path='')
+CORS(app)
+
+# Store job status in memory (in production, use Redis or database)
+jobs = {}
+transcripts = {}
+
+# Create output directory for transcripts
+OUTPUT_DIR = Path("transcripts")
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+AUDIO_DIR = Path("audio_temp")
+AUDIO_DIR.mkdir(exist_ok=True)
+
+
+class TranscriptionJob:
+    """Represents a transcription job with progress tracking."""
+
+    def __init__(self, job_id, url, model):
+        self.job_id = job_id
+        self.url = url
+        self.model = model
+        self.status = "queued"  # queued, capturing, downloading, transcribing, cleaning, complete, error
+        self.progress = 0  # 0-100
+        self.eta_minutes = None
+        self.error = None
+        self.transcript_path = None
+        self.transcript_preview = None
+        self.created_at = datetime.now()
+        self.started_at = None
+        self.completed_at = None
+
+    def to_dict(self):
+        """Convert job to dictionary for JSON response."""
+        return {
+            "job_id": self.job_id,
+            "url": self.url,
+            "model": self.model,
+            "status": self.status,
+            "progress": self.progress,
+            "eta_minutes": self.eta_minutes,
+            "error": self.error,
+            "transcript_preview": self.transcript_preview,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+def estimate_time(model, audio_duration_minutes=60):
+    """
+    Estimate transcription time based on model.
+    Returns minutes per hour of audio.
+    """
+    estimates = {
+        "tiny": 12.5,    # 10-15 min per hour
+        "base": 25,      # 20-30 min per hour
+        "small": 52.5,   # 45-60 min per hour
+        "medium": 150,   # 2-3 hours per hour
+        "large": 300     # 4-6 hours per hour
+    }
+    return estimates.get(model, 25)
+
+
+def run_transcription(job_id):
+    """
+    Run the transcription in a background thread.
+    Updates job status throughout the process.
+    """
+    job = jobs.get(job_id)
+    if not job:
+        return
+
+    try:
+        job.started_at = datetime.now()
+        job.status = "capturing"
+        job.progress = 5
+
+        # Step 1: Download audio
+        job.status = "downloading"
+        job.progress = 10
+        job.eta_minutes = estimate_time(job.model)
+
+        audio_path = download_audio(job.url, str(AUDIO_DIR))
+
+        job.progress = 30
+
+        # Step 2: Transcribe
+        job.status = "transcribing"
+        job.progress = 40
+
+        transcript = transcribe_audio(audio_path, job.model)
+
+        job.progress = 80
+
+        # Step 3: Clean transcript
+        job.status = "cleaning"
+        job.progress = 85
+
+        transcript = clean_transcript(transcript)
+
+        # Step 4: Save transcript
+        job.progress = 90
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"transcript_{timestamp}_{job_id[:8]}.txt"
+        output_path = OUTPUT_DIR / output_filename
+
+        save_transcript(transcript, str(output_path))
+
+        # Clean up audio file
+        try:
+            os.remove(audio_path)
+        except:
+            pass
+
+        # Store results
+        job.status = "complete"
+        job.progress = 100
+        job.eta_minutes = 0
+        job.transcript_path = str(output_path)
+        job.transcript_preview = transcript[:500] if len(transcript) > 500 else transcript
+        job.completed_at = datetime.now()
+
+        # Cache the full transcript
+        transcripts[job_id] = transcript
+
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+        job.progress = 0
+        print(f"Error in transcription job {job_id}: {e}", file=sys.stderr)
+
+
+@app.route('/')
+def index():
+    """Serve the main HTML page."""
+    return send_from_directory('static', 'index.html')
+
+
+@app.route('/api/check-dependencies', methods=['GET'])
+def api_check_dependencies():
+    """Check if all required dependencies are installed."""
+    try:
+        check_dependencies()
+        return jsonify({"status": "ok", "message": "All dependencies are installed"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/transcribe', methods=['POST'])
+def api_transcribe():
+    """
+    Start a new transcription job.
+
+    Request body:
+    {
+        "url": "https://podcast.ucsd.edu/...",
+        "model": "base"  # optional, defaults to "base"
+    }
+
+    Returns:
+    {
+        "job_id": "uuid"
+    }
+    """
+    data = request.get_json()
+
+    if not data or 'url' not in data:
+        return jsonify({"error": "Missing 'url' parameter"}), 400
+
+    url = data['url']
+    model = data.get('model', 'base')
+
+    # Validate model
+    valid_models = ['tiny', 'base', 'small', 'medium', 'large']
+    if model not in valid_models:
+        return jsonify({"error": f"Invalid model. Must be one of: {', '.join(valid_models)}"}), 400
+
+    # Validate URL
+    if not url.startswith('http'):
+        return jsonify({"error": "Invalid URL format"}), 400
+
+    # Create job
+    job_id = str(uuid.uuid4())
+    job = TranscriptionJob(job_id, url, model)
+    jobs[job_id] = job
+
+    # Start transcription in background thread
+    thread = threading.Thread(target=run_transcription, args=(job_id,))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.route('/api/status/<job_id>', methods=['GET'])
+def api_status(job_id):
+    """
+    Get the status of a transcription job.
+
+    Returns:
+    {
+        "status": "queued|capturing|downloading|transcribing|cleaning|complete|error",
+        "progress": 0-100,
+        "eta_minutes": 15,
+        "transcript_preview": "...",
+        "error": "error message if failed"
+    }
+    """
+    job = jobs.get(job_id)
+
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    return jsonify(job.to_dict())
+
+
+@app.route('/api/download/<job_id>', methods=['GET'])
+def api_download(job_id):
+    """
+    Download the transcript file.
+    """
+    job = jobs.get(job_id)
+
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    if job.status != "complete":
+        return jsonify({"error": "Transcription not complete yet"}), 400
+
+    if not job.transcript_path or not os.path.exists(job.transcript_path):
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    return send_file(
+        job.transcript_path,
+        as_attachment=True,
+        download_name=f"transcript_{job_id[:8]}.txt",
+        mimetype='text/plain'
+    )
+
+
+@app.route('/api/transcript/<job_id>', methods=['GET'])
+def api_get_transcript(job_id):
+    """
+    Get the full transcript text as JSON.
+    """
+    job = jobs.get(job_id)
+
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    if job.status != "complete":
+        return jsonify({"error": "Transcription not complete yet"}), 400
+
+    transcript = transcripts.get(job_id)
+
+    if not transcript:
+        # Try to read from file
+        if job.transcript_path and os.path.exists(job.transcript_path):
+            with open(job.transcript_path, 'r', encoding='utf-8') as f:
+                transcript = f.read()
+                transcripts[job_id] = transcript
+        else:
+            return jsonify({"error": "Transcript not found"}), 404
+
+    return jsonify({
+        "job_id": job_id,
+        "transcript": transcript,
+        "url": job.url,
+        "model": job.model
+    })
+
+
+@app.route('/api/jobs', methods=['GET'])
+def api_list_jobs():
+    """
+    List all jobs (for debugging/admin).
+    """
+    return jsonify({
+        "jobs": [job.to_dict() for job in jobs.values()]
+    })
+
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("🎓 UCSD Podcast Transcriber - Web Interface")
+    print("=" * 60)
+    print()
+    print("Starting Flask server...")
+    print("Open your browser to: http://localhost:8080")
+    print()
+    print("Press Ctrl+C to stop the server")
+    print("=" * 60)
+    print()
+
+    app.run(debug=True, host='0.0.0.0', port=8080, threaded=True)

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UCSD Podcast Transcriber</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'ucsd-navy': '#182B49',
+                        'ucsd-gold': '#C69214',
+                        'ucsd-blue': '#006A96',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-3xl">
+        <!-- Header -->
+        <div class="bg-ucsd-navy text-white rounded-t-lg p-6 shadow-lg">
+            <h1 class="text-3xl font-bold flex items-center">
+                <svg class="w-8 h-8 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"/>
+                </svg>
+                UCSD Podcast Transcriber
+            </h1>
+            <p class="text-gray-300 mt-2">Download and transcribe UCSD lecture podcasts using AI</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="bg-white rounded-b-lg shadow-lg p-6">
+            <!-- URL Input -->
+            <div class="mb-6">
+                <label for="podcast-url" class="block text-gray-700 font-semibold mb-2">
+                    Paste your UCSD podcast URL:
+                </label>
+                <input
+                    type="text"
+                    id="podcast-url"
+                    placeholder="https://podcast.ucsd.edu/watch/wi26/cogs108_b00/6"
+                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-ucsd-blue focus:outline-none transition"
+                    value=""
+                />
+                <p class="text-sm text-gray-500 mt-2">
+                    Example: https://podcast.ucsd.edu/watch/wi26/cogs108_b00/6
+                </p>
+            </div>
+
+            <!-- Model Selection -->
+            <div class="mb-6">
+                <label for="model-select" class="block text-gray-700 font-semibold mb-2">
+                    Select Whisper Model:
+                </label>
+                <select
+                    id="model-select"
+                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-ucsd-blue focus:outline-none transition bg-white"
+                >
+                    <option value="tiny">Tiny (fastest, ~10-15 min per hour of audio)</option>
+                    <option value="base" selected>Base (balanced, ~20-30 min per hour) - Recommended</option>
+                    <option value="small">Small (accurate, ~45-60 min per hour)</option>
+                    <option value="medium">Medium (very accurate, ~2-3 hours per hour)</option>
+                    <option value="large">Large (best quality, ~4-6 hours per hour)</option>
+                </select>
+                <p class="text-sm text-gray-500 mt-2" id="model-estimate">
+                    Estimated time: ~20-30 minutes per hour of audio
+                </p>
+            </div>
+
+            <!-- Transcribe Button -->
+            <button
+                id="transcribe-btn"
+                class="w-full bg-ucsd-gold hover:bg-yellow-600 text-white font-bold py-4 px-6 rounded-lg transition shadow-md hover:shadow-lg flex items-center justify-center"
+                onclick="startTranscription()"
+            >
+                <svg class="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd"/>
+                </svg>
+                Transcribe
+            </button>
+
+            <!-- Status Section (Initially Hidden) -->
+            <div id="status-section" class="mt-8 hidden">
+                <hr class="my-6 border-gray-300">
+
+                <!-- Status Message -->
+                <div class="mb-4">
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-700 font-semibold">Status:</span>
+                        <span id="status-text" class="text-ucsd-blue font-semibold">Starting...</span>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="mb-4">
+                    <div class="bg-gray-200 rounded-full h-6 overflow-hidden">
+                        <div
+                            id="progress-bar"
+                            class="bg-ucsd-gold h-full transition-all duration-300 flex items-center justify-end pr-2"
+                            style="width: 0%"
+                        >
+                            <span id="progress-percent" class="text-white text-sm font-semibold">0%</span>
+                        </div>
+                    </div>
+                    <p id="eta-text" class="text-sm text-gray-500 mt-2 text-center">
+                        Estimated time remaining: calculating...
+                    </p>
+                </div>
+
+                <!-- Error Message -->
+                <div id="error-section" class="hidden bg-red-50 border-2 border-red-300 rounded-lg p-4 mb-4">
+                    <div class="flex items-start">
+                        <svg class="w-6 h-6 text-red-500 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                        </svg>
+                        <div>
+                            <h3 class="font-semibold text-red-800 mb-1">Transcription Failed</h3>
+                            <p id="error-message" class="text-red-700 text-sm"></p>
+                            <p class="text-red-600 text-sm mt-2">
+                                <strong>Troubleshooting tips:</strong><br>
+                                • Make sure the URL is correct and accessible<br>
+                                • Check that all dependencies are installed (FFmpeg, Chrome, etc.)<br>
+                                • Try refreshing the page and starting again
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Success Section -->
+                <div id="success-section" class="hidden">
+                    <div class="bg-green-50 border-2 border-green-300 rounded-lg p-4 mb-4">
+                        <div class="flex items-center mb-2">
+                            <svg class="w-6 h-6 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                            </svg>
+                            <h3 class="font-semibold text-green-800">Transcription Complete!</h3>
+                        </div>
+                    </div>
+
+                    <!-- Preview -->
+                    <div class="mb-4">
+                        <h3 class="font-semibold text-gray-700 mb-2">Preview:</h3>
+                        <div class="bg-gray-50 border border-gray-300 rounded-lg p-4 text-sm text-gray-700 max-h-40 overflow-y-auto">
+                            <p id="transcript-preview" class="italic"></p>
+                        </div>
+                    </div>
+
+                    <!-- Download Button -->
+                    <button
+                        id="download-btn"
+                        onclick="downloadTranscript()"
+                        class="w-full bg-ucsd-navy hover:bg-blue-900 text-white font-bold py-3 px-6 rounded-lg transition shadow-md hover:shadow-lg flex items-center justify-center"
+                    >
+                        <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                        </svg>
+                        Download Transcript
+                    </button>
+
+                    <!-- Start New Button -->
+                    <button
+                        onclick="resetForm()"
+                        class="w-full mt-3 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-6 rounded-lg transition"
+                    >
+                        Transcribe Another Podcast
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center mt-8 text-gray-600 text-sm">
+            <p>Built with OpenAI Whisper | Requires FFmpeg and Google Chrome</p>
+            <p class="mt-1">UCSD Colors: <span class="text-ucsd-navy font-semibold">Navy #182B49</span> | <span class="text-ucsd-gold font-semibold">Gold #C69214</span></p>
+        </div>
+    </div>
+
+    <script>
+        let currentJobId = null;
+        let pollInterval = null;
+
+        // Update model estimate when selection changes
+        document.getElementById('model-select').addEventListener('change', function() {
+            const estimates = {
+                'tiny': '~10-15 minutes per hour of audio',
+                'base': '~20-30 minutes per hour of audio',
+                'small': '~45-60 minutes per hour of audio',
+                'medium': '~2-3 hours per hour of audio',
+                'large': '~4-6 hours per hour of audio'
+            };
+            document.getElementById('model-estimate').textContent =
+                'Estimated time: ' + estimates[this.value];
+        });
+
+        async function startTranscription() {
+            const url = document.getElementById('podcast-url').value.trim();
+            const model = document.getElementById('model-select').value;
+
+            if (!url) {
+                alert('Please enter a podcast URL');
+                return;
+            }
+
+            if (!url.startsWith('http')) {
+                alert('Please enter a valid URL starting with http:// or https://');
+                return;
+            }
+
+            // Show status section
+            document.getElementById('status-section').classList.remove('hidden');
+            document.getElementById('error-section').classList.add('hidden');
+            document.getElementById('success-section').classList.add('hidden');
+
+            // Disable button
+            const btn = document.getElementById('transcribe-btn');
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            // Reset progress
+            updateProgress(0, 'Starting transcription...');
+
+            try {
+                // Start transcription
+                const response = await fetch('/api/transcribe', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ url, model })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to start transcription');
+                }
+
+                const data = await response.json();
+                currentJobId = data.job_id;
+
+                // Start polling for status
+                pollStatus();
+
+            } catch (error) {
+                showError(error.message);
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        function pollStatus() {
+            if (!currentJobId) return;
+
+            // Clear existing interval
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+
+            // Poll every 2 seconds
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/status/${currentJobId}`);
+
+                    if (!response.ok) {
+                        throw new Error('Failed to get status');
+                    }
+
+                    const job = await response.json();
+
+                    // Update UI based on status
+                    if (job.status === 'error') {
+                        clearInterval(pollInterval);
+                        showError(job.error);
+                        return;
+                    }
+
+                    if (job.status === 'complete') {
+                        clearInterval(pollInterval);
+                        showSuccess(job.transcript_preview);
+                        return;
+                    }
+
+                    // Update progress
+                    const statusMessages = {
+                        'queued': 'Waiting to start...',
+                        'capturing': 'Capturing video stream...',
+                        'downloading': 'Downloading audio...',
+                        'transcribing': 'Transcribing audio...',
+                        'cleaning': 'Cleaning up transcript...'
+                    };
+
+                    const message = statusMessages[job.status] || job.status;
+                    updateProgress(job.progress, message, job.eta_minutes);
+
+                } catch (error) {
+                    console.error('Error polling status:', error);
+                }
+            }, 2000);
+        }
+
+        function updateProgress(percent, message, etaMinutes = null) {
+            document.getElementById('progress-bar').style.width = percent + '%';
+            document.getElementById('progress-percent').textContent = Math.round(percent) + '%';
+            document.getElementById('status-text').textContent = message;
+
+            if (etaMinutes !== null && etaMinutes > 0) {
+                const hours = Math.floor(etaMinutes / 60);
+                const mins = Math.round(etaMinutes % 60);
+                let etaText = 'Estimated time remaining: ';
+                if (hours > 0) {
+                    etaText += `~${hours}h ${mins}m`;
+                } else {
+                    etaText += `~${mins} minutes`;
+                }
+                document.getElementById('eta-text').textContent = etaText;
+            } else {
+                document.getElementById('eta-text').textContent = '';
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('error-section').classList.remove('hidden');
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('transcribe-btn').disabled = false;
+            document.getElementById('transcribe-btn').classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
+        function showSuccess(preview) {
+            document.getElementById('success-section').classList.remove('hidden');
+            document.getElementById('transcript-preview').textContent = preview;
+            updateProgress(100, 'Complete!', 0);
+        }
+
+        async function downloadTranscript() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/download/${currentJobId}`);
+
+                if (!response.ok) {
+                    throw new Error('Failed to download transcript');
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `transcript_${currentJobId.substring(0, 8)}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+            } catch (error) {
+                alert('Error downloading transcript: ' + error.message);
+            }
+        }
+
+        function resetForm() {
+            // Clear job
+            currentJobId = null;
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+
+            // Reset UI
+            document.getElementById('status-section').classList.add('hidden');
+            document.getElementById('error-section').classList.add('hidden');
+            document.getElementById('success-section').classList.add('hidden');
+            document.getElementById('podcast-url').value = '';
+            document.getElementById('model-select').value = 'base';
+            document.getElementById('transcribe-btn').disabled = false;
+            document.getElementById('transcribe-btn').classList.remove('opacity-50', 'cursor-not-allowed');
+
+            // Scroll to top
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+        });
+    </script>
+</body>
+</html>

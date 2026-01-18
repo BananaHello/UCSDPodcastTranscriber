@@ -1,9 +1,57 @@
+# Virtual Environment
 venv/
-__pycache__/
-*.pyc
-venv/
-venv/
+venv-webapp/
 .venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Audio/Video files (if you don't want to commit downloaded files)
+*.mp3
+*.mp4
+*.m3u8
+
+# Transcripts (optional - remove if you want to commit them)
+# transcript_*.txt
+# podcast_*.mp3
