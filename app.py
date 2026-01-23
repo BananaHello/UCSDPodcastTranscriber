@@ -42,10 +42,11 @@ AUDIO_DIR.mkdir(exist_ok=True)
 class TranscriptionJob:
     """Represents a transcription job with progress tracking."""
 
-    def __init__(self, job_id, url, model):
+    def __init__(self, job_id, url, model, output_folder=None):
         self.job_id = job_id
         self.url = url
         self.model = model
+        self.output_folder = output_folder  # Custom output folder path
         self.status = "queued"  # queued, capturing, downloading, transcribing, cleaning, complete, error
         self.progress = 0  # 0-100
         self.eta_minutes = None
@@ -129,7 +130,14 @@ def run_transcription(job_id):
         job.progress = 90
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_filename = f"transcript_{timestamp}_{job_id[:8]}.txt"
-        output_path = OUTPUT_DIR / output_filename
+
+        # Use custom output folder if specified, otherwise use default
+        if job.output_folder:
+            output_dir = Path(job.output_folder)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / output_filename
+        else:
+            output_path = OUTPUT_DIR / output_filename
 
         save_transcript(transcript, str(output_path))
 
@@ -181,7 +189,8 @@ def api_transcribe():
     Request body:
     {
         "url": "https://podcast.ucsd.edu/...",
-        "model": "base"  # optional, defaults to "base"
+        "model": "base",  # optional, defaults to "base"
+        "output_folder": "/path/to/folder"  # optional, custom output folder
     }
 
     Returns:
@@ -196,6 +205,7 @@ def api_transcribe():
 
     url = data['url']
     model = data.get('model', 'base')
+    output_folder = data.get('output_folder', '').strip()
 
     # Validate model
     valid_models = ['tiny', 'base', 'small', 'medium', 'large']
@@ -206,9 +216,23 @@ def api_transcribe():
     if not url.startswith('http'):
         return jsonify({"error": "Invalid URL format"}), 400
 
+    # Validate output folder if provided
+    if output_folder:
+        try:
+            # Expand user path (e.g., ~/Documents becomes /home/user/Documents)
+            output_folder = os.path.expanduser(output_folder)
+            # Validate that the path is safe (basic check)
+            output_folder_path = Path(output_folder).resolve()
+            # Create directory if it doesn't exist to verify we have permissions
+            output_folder_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"error": f"Invalid output folder: {str(e)}"}), 400
+    else:
+        output_folder = None
+
     # Create job
     job_id = str(uuid.uuid4())
-    job = TranscriptionJob(job_id, url, model)
+    job = TranscriptionJob(job_id, url, model, output_folder)
     jobs[job_id] = job
 
     # Start transcription in background thread

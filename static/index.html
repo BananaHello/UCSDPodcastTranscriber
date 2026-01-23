@@ -80,6 +80,36 @@
                 </p>
             </div>
 
+            <!-- Output Folder Selection -->
+            <div class="mb-6">
+                <label for="output-folder" class="block text-gray-700 font-semibold mb-2">
+                    Output Folder:
+                </label>
+                <div class="flex gap-2">
+                    <input
+                        type="text"
+                        id="output-folder"
+                        placeholder="transcripts (default)"
+                        class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-ucsd-blue focus:outline-none transition"
+                        value=""
+                    />
+                    <button
+                        id="browse-folder-btn"
+                        onclick="browseFolderHelp()"
+                        class="px-6 py-3 bg-ucsd-blue hover:bg-blue-700 text-white font-semibold rounded-lg transition shadow-md hover:shadow-lg flex items-center"
+                        title="Help choosing a folder"
+                    >
+                        <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                        </svg>
+                        Browse
+                    </button>
+                </div>
+                <p class="text-sm text-gray-500 mt-2">
+                    Enter the full path where you want transcripts saved (e.g., /Users/yourname/Documents/Transcripts)
+                </p>
+            </div>
+
             <!-- Transcribe Button -->
             <button
                 id="transcribe-btn"
@@ -192,6 +222,14 @@
         let currentJobId = null;
         let pollInterval = null;
 
+        // Load saved output folder on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            const savedFolder = localStorage.getItem('outputFolder');
+            if (savedFolder) {
+                document.getElementById('output-folder').value = savedFolder;
+            }
+        });
+
         // Update model estimate when selection changes
         document.getElementById('model-select').addEventListener('change', function() {
             const estimates = {
@@ -205,9 +243,33 @@
                 'Estimated time: ' + estimates[this.value];
         });
 
+        function browseFolderHelp() {
+            const message = `To set your output folder:
+
+1. Choose where you want transcripts saved on your computer
+2. Copy the full path to that folder:
+
+   macOS/Linux examples:
+   • /Users/yourname/Documents/Transcripts
+   • /home/yourname/transcripts
+   • ~/Desktop/MyTranscripts
+
+   Windows examples:
+   • C:\\Users\\yourname\\Documents\\Transcripts
+   • D:\\MyTranscripts
+
+3. Paste the path in the Output Folder field
+4. The folder will be created if it doesn't exist
+
+Tip: Leave it empty to use the default "transcripts" folder in the current directory.`;
+
+            alert(message);
+        }
+
         async function startTranscription() {
             const url = document.getElementById('podcast-url').value.trim();
             const model = document.getElementById('model-select').value;
+            const outputFolder = document.getElementById('output-folder').value.trim();
 
             if (!url) {
                 alert('Please enter a podcast URL');
@@ -217,6 +279,13 @@
             if (!url.startsWith('http')) {
                 alert('Please enter a valid URL starting with http:// or https://');
                 return;
+            }
+
+            // Save output folder preference
+            if (outputFolder) {
+                localStorage.setItem('outputFolder', outputFolder);
+            } else {
+                localStorage.removeItem('outputFolder');
             }
 
             // Show status section
@@ -239,7 +308,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ url, model })
+                    body: JSON.stringify({ url, model, output_folder: outputFolder })
                 });
 
                 if (!response.ok) {
