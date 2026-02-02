@@ -136,10 +136,13 @@ def run_transcription(job_id):
             output_dir = Path(job.output_folder)
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / output_filename
+            print(f"[DEBUG] Saving transcript to custom folder: {output_path}", file=sys.stderr)
         else:
             output_path = OUTPUT_DIR / output_filename
+            print(f"[DEBUG] Saving transcript to default folder: {output_path}", file=sys.stderr)
 
         save_transcript(transcript, str(output_path))
+        print(f"[DEBUG] Transcript successfully saved to: {output_path}", file=sys.stderr)
 
         # Clean up audio file
         try:
@@ -329,6 +332,81 @@ def api_list_jobs():
     return jsonify({
         "jobs": [job.to_dict() for job in jobs.values()]
     })
+
+
+@app.route('/api/browse-folders', methods=['POST'])
+def api_browse_folders():
+    """
+    Browse folders on the local file system.
+
+    Request body:
+    {
+        "path": "/path/to/directory"  # optional, defaults to user home
+    }
+
+    Returns:
+    {
+        "current_path": "/current/path",
+        "parent_path": "/parent/path",
+        "folders": [{"name": "folder1", "path": "/path/to/folder1"}, ...]
+    }
+    """
+    data = request.get_json() or {}
+    requested_path = data.get('path', '').strip()
+
+    # Default to user's home directory
+    if not requested_path:
+        requested_path = str(Path.home())
+    else:
+        # Expand user path
+        requested_path = os.path.expanduser(requested_path)
+
+    try:
+        current_path = Path(requested_path).resolve()
+
+        # Security check: ensure path exists and is a directory
+        if not current_path.exists():
+            return jsonify({"error": "Path does not exist"}), 400
+
+        if not current_path.is_dir():
+            return jsonify({"error": "Path is not a directory"}), 400
+
+        # Get parent path
+        parent_path = str(current_path.parent) if current_path.parent != current_path else None
+
+        # List folders in current directory
+        folders = []
+        try:
+            for item in sorted(current_path.iterdir()):
+                if item.is_dir() and not item.name.startswith('.'):
+                    folders.append({
+                        "name": item.name,
+                        "path": str(item)
+                    })
+        except PermissionError:
+            return jsonify({"error": "Permission denied to read this directory"}), 403
+
+        # Add common locations for quick access
+        quick_access = []
+        home = Path.home()
+        common_folders = ['Documents', 'Desktop', 'Downloads']
+        for folder_name in common_folders:
+            folder_path = home / folder_name
+            if folder_path.exists() and folder_path.is_dir():
+                quick_access.append({
+                    "name": folder_name,
+                    "path": str(folder_path)
+                })
+
+        return jsonify({
+            "current_path": str(current_path),
+            "parent_path": parent_path,
+            "folders": folders,
+            "quick_access": quick_access
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Error browsing folders: {str(e)}"}), 500
 
 
 if __name__ == '__main__':
