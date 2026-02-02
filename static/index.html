@@ -26,6 +26,34 @@
         .spinner {
             animation: spin 1s linear infinite;
         }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        .modal.show {
+            display: block;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .folder-item:hover {
+            background-color: #f0f0f0;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -218,6 +246,82 @@
         </div>
     </div>
 
+    <!-- Folder Picker Modal -->
+    <div id="folder-modal" class="modal">
+        <div class="modal-content">
+            <!-- Modal Header -->
+            <div class="bg-ucsd-navy text-white p-4 rounded-t-lg flex justify-between items-center">
+                <h2 class="text-xl font-bold">Select Output Folder</h2>
+                <button onclick="closeFolderPicker()" class="text-white hover:text-gray-300">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Current Path Display -->
+            <div class="p-4 bg-gray-100 border-b">
+                <label class="text-sm text-gray-600 font-semibold">Current Location:</label>
+                <div class="flex gap-2 mt-2">
+                    <input
+                        type="text"
+                        id="current-path-display"
+                        readonly
+                        class="flex-1 px-3 py-2 bg-white border rounded text-sm"
+                        value=""
+                    />
+                    <button
+                        onclick="selectCurrentFolder()"
+                        class="px-4 py-2 bg-ucsd-gold hover:bg-yellow-600 text-white font-semibold rounded"
+                    >
+                        Select This Folder
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Access -->
+            <div class="p-4 border-b bg-gray-50">
+                <label class="text-sm text-gray-700 font-semibold mb-2 block">Quick Access:</label>
+                <div id="quick-access-list" class="flex gap-2 flex-wrap"></div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="p-4 border-b">
+                <button
+                    id="parent-folder-btn"
+                    onclick="navigateToParent()"
+                    class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded flex items-center gap-2 text-sm font-semibold"
+                >
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd"/>
+                    </svg>
+                    Up to Parent Folder
+                </button>
+            </div>
+
+            <!-- Folder List -->
+            <div class="p-4" style="max-height: 400px; overflow-y: auto;">
+                <label class="text-sm text-gray-700 font-semibold mb-2 block">Folders:</label>
+                <div id="folder-list" class="space-y-1"></div>
+                <div id="folder-loading" class="hidden text-center py-4 text-gray-500">
+                    <div class="spinner inline-block w-6 h-6 border-4 border-gray-300 border-t-ucsd-blue rounded-full"></div>
+                    <span class="ml-2">Loading folders...</span>
+                </div>
+                <div id="folder-error" class="hidden bg-red-50 border border-red-300 rounded p-3 text-red-700 text-sm"></div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="p-4 bg-gray-100 rounded-b-lg flex justify-end gap-2">
+                <button
+                    onclick="closeFolderPicker()"
+                    class="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 font-semibold rounded"
+                >
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentJobId = null;
         let pollInterval = null;
@@ -243,27 +347,121 @@
                 'Estimated time: ' + estimates[this.value];
         });
 
-        function browseFolderHelp() {
-            const message = `To set your output folder:
+        let currentBrowsePath = null;
+        let parentBrowsePath = null;
 
-1. Choose where you want transcripts saved on your computer
-2. Copy the full path to that folder:
+        async function browseFolderHelp() {
+            // Open the folder picker modal
+            document.getElementById('folder-modal').classList.add('show');
 
-   macOS/Linux examples:
-   • /Users/yourname/Documents/Transcripts
-   • /home/yourname/transcripts
-   • ~/Desktop/MyTranscripts
+            // Load the initial folder (user's home or current output folder)
+            const currentFolder = document.getElementById('output-folder').value.trim();
+            await loadFolderContents(currentFolder || null);
+        }
 
-   Windows examples:
-   • C:\\Users\\yourname\\Documents\\Transcripts
-   • D:\\MyTranscripts
+        async function loadFolderContents(path) {
+            const loadingEl = document.getElementById('folder-loading');
+            const errorEl = document.getElementById('folder-error');
+            const folderListEl = document.getElementById('folder-list');
+            const quickAccessEl = document.getElementById('quick-access-list');
 
-3. Paste the path in the Output Folder field
-4. The folder will be created if it doesn't exist
+            // Show loading
+            loadingEl.classList.remove('hidden');
+            errorEl.classList.add('hidden');
+            folderListEl.innerHTML = '';
+            quickAccessEl.innerHTML = '';
 
-Tip: Leave it empty to use the default "transcripts" folder in the current directory.`;
+            try {
+                const response = await fetch('/api/browse-folders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ path: path || '' })
+                });
 
-            alert(message);
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to browse folders');
+                }
+
+                const data = await response.json();
+
+                // Update current path
+                currentBrowsePath = data.current_path;
+                parentBrowsePath = data.parent_path;
+                document.getElementById('current-path-display').value = currentBrowsePath;
+
+                // Enable/disable parent button
+                const parentBtn = document.getElementById('parent-folder-btn');
+                if (parentBrowsePath) {
+                    parentBtn.disabled = false;
+                    parentBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                } else {
+                    parentBtn.disabled = true;
+                    parentBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+
+                // Render quick access folders
+                data.quick_access.forEach(folder => {
+                    const btn = document.createElement('button');
+                    btn.className = 'px-3 py-1 bg-ucsd-blue hover:bg-blue-700 text-white text-sm rounded';
+                    btn.textContent = folder.name;
+                    btn.onclick = () => loadFolderContents(folder.path);
+                    quickAccessEl.appendChild(btn);
+                });
+
+                // Render folders
+                if (data.folders.length === 0) {
+                    folderListEl.innerHTML = '<p class="text-gray-500 text-sm italic">No folders in this directory</p>';
+                } else {
+                    data.folders.forEach(folder => {
+                        const folderDiv = document.createElement('div');
+                        folderDiv.className = 'folder-item flex items-center gap-2 p-2 rounded cursor-pointer';
+                        folderDiv.onclick = () => loadFolderContents(folder.path);
+
+                        folderDiv.innerHTML = `
+                            <svg class="w-5 h-5 text-ucsd-gold flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                            </svg>
+                            <span class="text-sm">${folder.name}</span>
+                        `;
+
+                        folderListEl.appendChild(folderDiv);
+                    });
+                }
+
+            } catch (error) {
+                errorEl.textContent = error.message;
+                errorEl.classList.remove('hidden');
+            } finally {
+                loadingEl.classList.add('hidden');
+            }
+        }
+
+        function navigateToParent() {
+            if (parentBrowsePath) {
+                loadFolderContents(parentBrowsePath);
+            }
+        }
+
+        function selectCurrentFolder() {
+            if (currentBrowsePath) {
+                document.getElementById('output-folder').value = currentBrowsePath;
+                closeFolderPicker();
+            }
+        }
+
+        function closeFolderPicker() {
+            document.getElementById('folder-modal').classList.remove('show');
+        }
+
+        // Close modal when clicking outside of it
+        window.onclick = function(event) {
+            const modal = document.getElementById('folder-modal');
+            if (event.target === modal) {
+                closeFolderPicker();
+            }
         }
 
         async function startTranscription() {
